@@ -35,6 +35,7 @@ Future<Exercise?> showExerciseDialog(BuildContext context,
   final name = TextEditingController(text: ex?.name ?? '');
   final memo = TextEditingController(text: ex?.memo ?? '');
   var part = ex?.bodyPart ?? '胸';
+  var loadType = ex?.loadType ?? loadNormal;
   if (!bodyParts.contains(part)) part = 'その他';
 
   final saved = await showDialog<bool>(
@@ -58,6 +59,17 @@ Future<Exercise?> showExerciseDialog(BuildContext context,
                   DropdownMenuItem(value: p, child: Text(p)),
               ],
               onChanged: (v) => setState(() => part = v ?? part),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: loadType,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: '負荷の計算'),
+              items: [
+                for (final e in loadTypeLabels.entries)
+                  DropdownMenuItem(value: e.key, child: Text(e.value)),
+              ],
+              onChanged: (v) => setState(() => loadType = v ?? loadType),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -90,6 +102,7 @@ Future<Exercise?> showExerciseDialog(BuildContext context,
       name: name.text.trim(),
       bodyPart: part,
       memo: memo.text.trim(),
+      loadType: loadType,
     );
     store.addExercise(created);
     return created;
@@ -97,7 +110,8 @@ Future<Exercise?> showExerciseDialog(BuildContext context,
   ex
     ..name = name.text.trim()
     ..bodyPart = part
-    ..memo = memo.text.trim();
+    ..memo = memo.text.trim()
+    ..loadType = loadType;
   store.changed();
   return ex;
 }
@@ -191,6 +205,18 @@ class _ExercisePickerState extends State<_ExercisePicker> {
                     ListTile(
                       title: Text(e.name),
                       onTap: () => Navigator.pop(context, e),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: '種目を削除',
+                        onPressed: () async {
+                          final ok = await confirmDialog(context,
+                              '「${e.name}」を削除しますか？\nメニューからも外れます。過去の記録は残ります。',
+                              ok: '削除');
+                          if (!ok) return;
+                          store.deleteExercise(e.id);
+                          if (mounted) setState(() {});
+                        },
+                      ),
                     ),
                 ];
               }(),

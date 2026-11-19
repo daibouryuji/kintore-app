@@ -22,28 +22,66 @@ String fmtNum(num v) =>
 
 const bodyParts = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
 
+/// 負荷の種類
+const loadNormal = 'normal'; // 入力した重量がそのまま負荷
+const loadBodyweight = 'bodyweight'; // 体重 ＋ 加重
+const loadAssisted = 'assisted'; // 体重 − アシスト
+const loadRepsOnly = 'reps'; // 回数だけ記録（腹筋など）
+const loadTypeLabels = {
+  loadNormal: '通常（入力した重量）',
+  loadBodyweight: '自重（体重＋加重）',
+  loadAssisted: 'アシスト（体重−アシスト）',
+  loadRepsOnly: '回数のみ（腹筋など）',
+};
+
+/// 推定1RM（Epley式：負荷 ×（1 + 回数 / 30））。1回ならその負荷。
+double? e1rmOf(double? load, int? reps) {
+  if (load == null || reps == null || load <= 0 || reps <= 0) return null;
+  return reps == 1 ? load : load * (1 + reps / 30);
+}
+
 class Exercise {
   final String id;
   String name;
   String bodyPart;
   String memo;
+  String loadType;
 
   Exercise({
     required this.id,
     required this.name,
     this.bodyPart = 'その他',
     this.memo = '',
+    this.loadType = loadNormal,
   });
 
-  Map<String, dynamic> toJson() =>
-      {'id': id, 'name': name, 'bodyPart': bodyPart, 'memo': memo};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'bodyPart': bodyPart,
+        'memo': memo,
+        'loadType': loadType,
+      };
 
-  factory Exercise.fromJson(Map<String, dynamic> j) => Exercise(
-        id: j['id'] as String,
-        name: j['name'] as String,
-        bodyPart: (j['bodyPart'] as String?) ?? 'その他',
-        memo: (j['memo'] as String?) ?? '',
-      );
+  factory Exercise.fromJson(Map<String, dynamic> j) {
+    final name = j['name'] as String;
+    var type = j['loadType'] as String?;
+    // 古いデータは、名前から自重・アシスト種目を推測する
+    type ??= name.contains('アシスト')
+        ? loadAssisted
+        : (name == '懸垂' || name == 'ディップス' || name.contains('チンニング'))
+            ? loadBodyweight
+            : (name.contains('アブローラー') || name.contains('腹筋'))
+                ? loadRepsOnly
+                : loadNormal;
+    return Exercise(
+      id: j['id'] as String,
+      name: name,
+      bodyPart: (j['bodyPart'] as String?) ?? 'その他',
+      memo: (j['memo'] as String?) ?? '',
+      loadType: type,
+    );
+  }
 }
 
 /// メニューに入っている1種目（目標セット数・回数つき）
@@ -102,23 +140,23 @@ class SetEntry {
   double? weight;
   int? reps;
 
-  /// チェックを入れたセットだけが「やった記録」として扱われる
-  bool done;
+  SetEntry({required this.id, this.weight, this.reps});
 
-  SetEntry({required this.id, this.weight, this.reps, this.done = false});
+  /// 回数が入っていれば「やったセット」（自重種目は重量が空でもよい）
+  bool get done => reps != null && reps! > 0;
 
-  Map<String, dynamic> toJson() =>
-      {'id': id, 'weight': weight, 'reps': reps, 'done': done};
+  Map<String, dynamic> toJson() => {'id': id, 'weight': weight, 'reps': reps};
 
   factory SetEntry.fromJson(Map<String, dynamic> j) => SetEntry(
         id: (j['id'] as String?) ?? newId(),
         weight: (j['weight'] as num?)?.toDouble(),
         reps: (j['reps'] as num?)?.toInt(),
-        done: (j['done'] as bool?) ?? false,
       );
 
-  String get label => '${fmtNum(weight ?? 0)}kg×${reps ?? 0}';
 }
+
+/// 小数1桁に丸めて表示（100.0 → "100", 103.33 → "103.3"）
+String fmt1(double v) => fmtNum((v * 10).round() / 10);
 
 class ExerciseLog {
   final String exerciseId;
@@ -157,6 +195,9 @@ class Workout {
   }) : logs = logs ?? [];
 
   bool get hasDone => logs.any((l) => l.sets.any((s) => s.done));
+
+  int get doneSetCount => logs.fold(0, (a, l) => a + l.doneSets.length);
+  int get setCount => logs.fold(0, (a, l) => a + l.sets.length);
 
   Map<String, dynamic> toJson() => {
         'id': id,

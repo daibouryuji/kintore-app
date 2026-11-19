@@ -167,6 +167,16 @@ class Store extends ChangeNotifier {
     return null;
   }
 
+  /// その日より前で、同じメニューを最後にやった日
+  Workout? previousWorkoutOfMenu(String menuId, String date) {
+    for (final w in workouts.reversed) {
+      if (w.date.compareTo(date) < 0 && w.menuId == menuId && w.hasDone) {
+        return w;
+      }
+    }
+    return null;
+  }
+
   void saveWorkout(Workout w) {
     if (!workouts.contains(w)) {
       workouts.removeWhere((x) => x.date == w.date);
@@ -175,6 +185,73 @@ class Store extends ChangeNotifier {
     }
     changed();
   }
+
+  // ---------- 負荷・1RM・ボリューム ----------
+
+  /// その日時点の体重（その日以前で最新。なければ最初の記録）
+  double? bodyWeightOn(String date) {
+    BodyWeight? found;
+    for (final b in bodyWeights) {
+      if (b.date.compareTo(date) > 0) break;
+      found = b;
+    }
+    found ??= bodyWeights.isEmpty ? null : bodyWeights.first;
+    return found?.kg;
+  }
+
+  String loadTypeOf(String exerciseId) =>
+      exercise(exerciseId)?.loadType ?? loadNormal;
+
+  /// 実際にかかった負荷。自重・アシストで体重が未記録なら null。
+  double? loadOf(String exerciseId, SetEntry s, String date) {
+    final type = loadTypeOf(exerciseId);
+    if (type == loadRepsOnly) return null;
+    if (type == loadNormal) return s.weight;
+    final bw = bodyWeightOn(date);
+    if (bw == null) return null;
+    final input = s.weight ?? 0;
+    return type == loadAssisted ? bw - input : bw + input;
+  }
+
+  double? setE1rm(String exerciseId, SetEntry s, String date) =>
+      e1rmOf(loadOf(exerciseId, s, date), s.reps);
+
+  double setVolume(String exerciseId, SetEntry s, String date) =>
+      (loadOf(exerciseId, s, date) ?? 0) * (s.reps ?? 0);
+
+  double logVolume(ExerciseLog l, String date) => l.doneSets
+      .fold(0.0, (a, s) => a + setVolume(l.exerciseId, s, date));
+
+  double workoutVolume(Workout w) =>
+      w.logs.fold(0.0, (a, l) => a + logVolume(l, w.date));
+
+  double? bestE1rm(String exerciseId, Iterable<SetEntry> sets, String date) {
+    double? best;
+    for (final s in sets) {
+      final v = setE1rm(exerciseId, s, date);
+      if (v != null && (best == null || v > best)) best = v;
+    }
+    return best;
+  }
+
+  /// 「100kg×8」「+10kg×8」「自重×8」「アシスト14kg×8」
+  String setLabel(String exerciseId, SetEntry s) {
+    final w = s.weight;
+    final r = s.reps ?? 0;
+    switch (loadTypeOf(exerciseId)) {
+      case loadBodyweight:
+        return (w == null || w == 0) ? '自重×$r' : '+${fmtNum(w)}kg×$r';
+      case loadAssisted:
+        return 'アシスト${fmtNum(w ?? 0)}kg×$r';
+      case loadRepsOnly:
+        return '$r回';
+      default:
+        return '${fmtNum(w ?? 0)}kg×$r';
+    }
+  }
+
+  int totalReps(Iterable<SetEntry> sets) =>
+      sets.fold(0, (a, s) => a + (s.reps ?? 0));
 
   // ---------- 体重 ----------
 
@@ -205,7 +282,7 @@ class Store extends ChangeNotifier {
   }
 
   String exportCsv() {
-    final b = StringBuffer('日付,メニュー,種目,セット,重量(kg),回数\n');
+    final b = StringBuffer('日付,メニュー,種目,セット,入力重量(kg),回数,実負荷(kg)\n');
     String q(String s) => '"${s.replaceAll('"', '""')}"';
     for (final w in workouts) {
       final menuName = menu(w.menuId)?.name ?? '';
@@ -221,6 +298,7 @@ class Store extends ChangeNotifier {
             n,
             fmtNum(s.weight ?? 0),
             s.reps ?? 0,
+            fmt1(loadOf(l.exerciseId, s, w.date) ?? 0),
           ].join(','));
         }
       }

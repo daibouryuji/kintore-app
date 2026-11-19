@@ -30,6 +30,7 @@ class MenusScreen extends StatelessWidget {
             Expanded(
               child: ReorderableListView(
                 padding: const EdgeInsets.only(bottom: 96),
+                buildDefaultDragHandles: false,
                 onReorder: (oldIndex, newIndex) {
                   if (newIndex > oldIndex) newIndex--;
                   final m = store.menus.removeAt(oldIndex);
@@ -37,9 +38,25 @@ class MenusScreen extends StatelessWidget {
                   store.changed();
                 },
                 children: [
-                  for (final m in store.menus)
+                  for (final (i, m) in store.menus.indexed)
                     ListTile(
                       key: ValueKey(m.id),
+                      leading: ReorderableDragStartListener(
+                        index: i,
+                        child: const Icon(Icons.drag_handle),
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: '削除',
+                        onPressed: () async {
+                          final ok = await confirmDialog(context,
+                              '「${m.name}」を削除しますか？\n過去の記録は残ります。',
+                              ok: '削除');
+                          if (!ok) return;
+                          store.menus.remove(m);
+                          store.changed();
+                        },
+                      ),
                       title: Text(m.name),
                       subtitle: Text(
                           '${m.weekday == null ? '曜日なし' : '${weekdayLabels[m.weekday! - 1]}曜日'} ・ ${m.items.length}種目'),
@@ -157,6 +174,7 @@ class _MenuEditPageState extends State<MenuEditPage> {
           ),
           body: ReorderableListView(
             padding: const EdgeInsets.only(bottom: 96),
+            buildDefaultDragHandles: false,
             header: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: Column(
@@ -187,7 +205,7 @@ class _MenuEditPageState extends State<MenuEditPage> {
                     },
                   ),
                   const SizedBox(height: 16),
-                  Text('種目（長押しで並べ替え、タップでセット数・回数を変更）',
+                  Text('種目（≡ をドラッグで並べ替え、タップでセット数・回数を変更）',
                       style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
@@ -199,9 +217,13 @@ class _MenuEditPageState extends State<MenuEditPage> {
               store.changed();
             },
             children: [
-              for (final it in m.items)
+              for (final (i, it) in m.items.indexed)
                 ListTile(
                   key: ObjectKey(it),
+                  leading: ReorderableDragStartListener(
+                    index: i,
+                    child: const Icon(Icons.drag_handle),
+                  ),
                   title: Text(store.exercise(it.exerciseId)?.name ?? '削除した種目'),
                   subtitle: Text('${it.sets}セット × ${it.reps}'),
                   onTap: () => _editItem(it),

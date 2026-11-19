@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../store.dart';
 import '../widgets.dart';
+import 'exercises_screen.dart';
 
 class TodayScreen extends StatefulWidget {
   const TodayScreen({super.key});
@@ -49,17 +50,11 @@ class _TodayScreenState extends State<TodayScreen> {
         ],
       );
 
-  /// 前回の重量・回数を最初から入れておく
-  ExerciseLog _logFor(String exerciseId, int sets) {
-    final last = store.lastSets(exerciseId, dateKey)?.$2 ?? const <SetEntry>[];
-    return ExerciseLog(
-      exerciseId: exerciseId,
-      sets: List.generate(sets < 1 ? 1 : sets, (i) {
-        final src = last.isEmpty ? null : last[i < last.length ? i : last.length - 1];
-        return SetEntry(id: newId(), weight: src?.weight, reps: src?.reps);
-      }),
-    );
-  }
+  /// 空のセットを目標セット数だけ用意する
+  ExerciseLog _logFor(String exerciseId, int sets) => ExerciseLog(
+        exerciseId: exerciseId,
+        sets: List.generate(sets < 1 ? 1 : sets, (_) => SetEntry(id: newId())),
+      );
 
   void _commit() => store.saveWorkout(workout);
 
@@ -157,6 +152,7 @@ class _TodayScreenState extends State<TodayScreen> {
                 date: date,
                 onChanged: _changeMenu,
               ),
+              if (w.logs.isNotEmpty) _DaySummary(workout: w),
               const SizedBox(height: 8),
               if (w.logs.isEmpty)
                 const Padding(
@@ -223,53 +219,113 @@ class _MenuSelector extends StatelessWidget {
     final suggested = store.suggestedMenu(date);
     final since = current == null ? null : store.daysSinceMenu(current.id, key);
     final theme = Theme.of(context);
+    final showHint = suggested?.id != current?.id;
+
+    Widget chip(String? id, String label, {String? sub}) {
+      final selected = id == current?.id;
+      final isSuggested = id == suggested?.id;
+      return ChoiceChip(
+        selected: selected,
+        showCheckmark: false,
+        avatar: isSuggested && !selected
+            ? const Icon(Icons.lightbulb_outline, size: 18)
+            : null,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        label: Text.rich(
+          TextSpan(children: [
+            TextSpan(
+              text: label,
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            if (sub != null)
+              TextSpan(text: ' $sub', style: theme.textTheme.labelSmall),
+          ]),
+        ),
+        onSelected: (_) {
+          if (!selected) onChanged(id);
+        },
+      );
+    }
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              const Text('メニュー：'),
-              Expanded(
-                child: DropdownButton<String?>(
-                  value: current?.id,
-                  isExpanded: true,
-                  underline: const SizedBox(),
-                  style: theme.textTheme.titleLarge,
-                  items: [
-                    const DropdownMenuItem<String?>(
-                        value: null, child: Text('休み／自由')),
-                    for (final m in store.menus)
-                      DropdownMenuItem<String?>(
-                        value: m.id,
-                        child: Text(m.weekday == null
-                            ? m.name
-                            : '${m.name}（${weekdayLabels[m.weekday! - 1]}）'),
-                      ),
-                  ],
-                  onChanged: onChanged,
-                ),
-              ),
-            ]),
-            if (current != null)
-              Text(
-                since == null ? '${current.name}：はじめて' : '前回の${current.name}：$since日前',
-                style: theme.textTheme.bodySmall,
-              ),
-            if (suggested != null && suggested.id != current?.id)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => onChanged(suggested.id),
-                  icon: const Icon(Icons.lightbulb_outline, size: 18),
-                  label: Text(
-                      '${store.rotationMode ? '順番どおりなら' : '曜日どおりなら'}「${suggested.name}」'),
-                ),
-              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final m in store.menus)
+                  chip(m.id, m.name,
+                      sub: m.weekday == null
+                          ? null
+                          : weekdayLabels[m.weekday! - 1]),
+                chip(null, '休み'),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              [
+                if (current != null)
+                  since == null
+                      ? '${current.name}は今回がはじめて'
+                      : '前回の${current.name}：$since日前',
+                if (showHint)
+                  '💡 ${store.rotationMode ? '順番' : '曜日'}どおりなら「${suggested?.name ?? '休み'}」',
+              ].join('　'),
+              style: theme.textTheme.bodySmall,
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _DaySummary extends StatelessWidget {
+  const _DaySummary({required this.workout});
+
+  final Workout workout;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final w = workout;
+    final prev = w.menuId == null
+        ? null
+        : store.previousWorkoutOfMenu(w.menuId!, w.date);
+    final vol = store.workoutVolume(w);
+    String? diff;
+    if (prev != null && vol > 0) {
+      final d = vol - store.workoutVolume(prev);
+      diff = '前回比 ${d >= 0 ? '+' : ''}${fmtNum(d.round())}kg';
+    }
+
+    Widget stat(String label, String value, {String? sub}) => Expanded(
+          child: Column(children: [
+            Text(label, style: theme.textTheme.labelSmall),
+            const SizedBox(height: 2),
+            Text(value,
+                style: theme.textTheme.titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            if (sub != null)
+              Text(sub,
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: theme.colorScheme.primary)),
+          ]),
+        );
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        child: Row(children: [
+          stat('完了セット', '${w.doneSetCount} / ${w.setCount}'),
+          stat('総ボリューム', '${fmtNum(vol.round())} kg', sub: diff),
+          stat('種目', '${w.logs.where((l) => l.doneSets.isNotEmpty).length} / ${w.logs.length}'),
+        ]),
       ),
     );
   }
@@ -296,6 +352,11 @@ class ExerciseCard extends StatelessWidget {
     final theme = Theme.of(context);
     final ex = store.exercise(log.exerciseId);
     final last = store.lastSets(log.exerciseId, date);
+    final todayBest = store.bestE1rm(log.exerciseId, log.doneSets, date);
+    final lastBest =
+        last == null ? null : store.bestE1rm(log.exerciseId, last.$2, last.$1);
+    final type = ex?.loadType ?? loadNormal;
+    final bw = store.bodyWeightOn(date);
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -306,10 +367,35 @@ class ExerciseCard extends StatelessWidget {
           children: [
             Row(children: [
               Expanded(
-                child: Text(
-                  ex?.name ?? '削除した種目',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: ex == null
+                        ? null
+                        : () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      ExerciseDetailPage(exercise: ex)),
+                            ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Flexible(
+                          child: Text(
+                            ex?.name ?? '削除した種目',
+                            style: theme.textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        if (ex != null)
+                          Icon(Icons.chevron_right,
+                              size: 20,
+                              color: theme.colorScheme.onSurfaceVariant),
+                      ]),
+                    ),
+                  ),
                 ),
               ),
               if (target != null)
@@ -344,12 +430,57 @@ class ExerciseCard extends StatelessWidget {
                   ),
                 ),
               ),
-            if (last != null)
+            if (type == loadRepsOnly && log.doneSets.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
-                  '前回 ${shortDate(last.$1)}：${last.$2.map((s) => s.label).join(', ')}',
-                  style: theme.textTheme.bodySmall,
+                  '合計 ${store.totalReps(log.doneSets)}回'
+                  '${last == null ? '' : '（前回 ${store.totalReps(last.$2)}回）'}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.bold),
+                ),
+              ),
+            if (type == loadBodyweight || type == loadAssisted)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  bw == null
+                      ? '⚠ 体重が未記録のため実負荷を計算できません（体重タブで記録）'
+                      : type == loadAssisted
+                          ? '実負荷 = 体重 ${fmtNum(bw)}kg − アシスト'
+                          : '実負荷 = 体重 ${fmtNum(bw)}kg ＋ 加重',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                      color: bw == null
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.onSurfaceVariant),
+                ),
+              ),
+            if (last != null && todayBest == null && log.doneSets.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text('前回 ${shortDate(last.$1)}',
+                    style: theme.textTheme.bodySmall),
+              ),
+            if (todayBest != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text.rich(
+                  TextSpan(children: [
+                    TextSpan(
+                      text: '推定1RM ${fmt1(todayBest)}kg',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    if (lastBest != null)
+                      TextSpan(
+                        text: '（前回 ${fmt1(lastBest)}kg ${_signed(todayBest - lastBest)}）',
+                      ),
+                    TextSpan(
+                        text:
+                            '　ボリューム ${fmtNum(store.logVolume(log, date).round())}kg'),
+                  ]),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.primary),
                 ),
               ),
             for (var i = 0; i < log.sets.length; i++)
@@ -357,6 +488,11 @@ class ExerciseCard extends StatelessWidget {
                 key: ObjectKey(log.sets[i]),
                 index: i + 1,
                 entry: log.sets[i],
+                exerciseId: log.exerciseId,
+                date: date,
+                previous: last == null
+                    ? null
+                    : last.$2[i < last.$2.length ? i : last.$2.length - 1],
                 onChanged: onChanged,
                 onDelete: () {
                   log.sets.removeAt(i);
@@ -365,9 +501,7 @@ class ExerciseCard extends StatelessWidget {
               ),
             TextButton.icon(
               onPressed: () {
-                final prev = log.sets.isEmpty ? null : log.sets.last;
-                log.sets.add(SetEntry(
-                    id: newId(), weight: prev?.weight, reps: prev?.reps));
+                log.sets.add(SetEntry(id: newId()));
                 onChanged();
               },
               icon: const Icon(Icons.add, size: 18),
@@ -385,12 +519,20 @@ class SetRow extends StatefulWidget {
     super.key,
     required this.index,
     required this.entry,
+    required this.exerciseId,
+    required this.date,
+    required this.previous,
     required this.onChanged,
     required this.onDelete,
   });
 
   final int index;
   final SetEntry entry;
+  final String exerciseId;
+  final String date;
+
+  /// 前回の同じセット番号の記録（タップで入力欄にコピー）
+  final SetEntry? previous;
   final VoidCallback onChanged;
   final VoidCallback onDelete;
 
@@ -411,14 +553,55 @@ class _SetRowState extends State<SetRow> {
     super.dispose();
   }
 
+  void _copyPrevious() {
+    final p = widget.previous;
+    if (p == null) return;
+    final e = widget.entry;
+    e
+      ..weight = p.weight
+      ..reps = p.reps;
+    weight.text = p.weight == null ? '' : fmtNum(p.weight!);
+    reps.text = p.reps?.toString() ?? '';
+    widget.onChanged();
+  }
+
+  InputDecoration _deco(String hint, String suffix, ThemeData theme) =>
+      InputDecoration(
+        isDense: true,
+        filled: true,
+        fillColor: theme.colorScheme.surfaceContainerHighest,
+        hintText: hint,
+        suffixText: suffix,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final e = widget.entry;
     final theme = Theme.of(context);
+    final type = store.loadTypeOf(widget.exerciseId);
+    final rm = store.setE1rm(widget.exerciseId, e, widget.date);
+    final load = type == loadNormal
+        ? null
+        : store.loadOf(widget.exerciseId, e, widget.date);
+    final prev = widget.previous;
+    final hint = switch (type) {
+      loadBodyweight => '加重',
+      loadAssisted => 'アシスト',
+      _ => '重量',
+    };
     return Container(
-      margin: const EdgeInsets.only(right: 4, top: 2, bottom: 2),
+      margin: const EdgeInsets.only(right: 4, top: 3, bottom: 3),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       decoration: BoxDecoration(
-        color: e.done ? theme.colorScheme.primaryContainer.withValues(alpha: 0.5) : null,
+        color: e.done
+            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.5)
+            : null,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(children: [
@@ -427,39 +610,65 @@ class _SetRowState extends State<SetRow> {
           child: Text('${widget.index}',
               textAlign: TextAlign.center, style: theme.textTheme.bodySmall),
         ),
-        Expanded(
+        if (type == loadRepsOnly)
+          const SizedBox(width: 4)
+        else ...[
+        SizedBox(
+          width: 104,
           child: TextField(
             controller: weight,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             textAlign: TextAlign.right,
-            decoration: const InputDecoration(
-                isDense: true, suffixText: 'kg', border: InputBorder.none),
+            decoration: _deco(hint, 'kg', theme),
             onChanged: (v) {
               e.weight = double.tryParse(v.replaceAll(',', '.'));
               widget.onChanged();
             },
           ),
         ),
-        const SizedBox(width: 12),
-        Expanded(
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 6),
+          child: Text('×'),
+        ),
+        ],
+        SizedBox(
+          width: 84,
           child: TextField(
             controller: reps,
             keyboardType: TextInputType.number,
             textAlign: TextAlign.right,
-            decoration: const InputDecoration(
-                isDense: true, suffixText: '回', border: InputBorder.none),
+            decoration: _deco('回数', '回', theme),
             onChanged: (v) {
               e.reps = int.tryParse(v);
               widget.onChanged();
             },
           ),
         ),
-        Checkbox(
-          value: e.done,
-          onChanged: (v) {
-            e.done = v ?? false;
-            widget.onChanged();
-          },
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (prev != null)
+                InkWell(
+                  onTap: _copyPrevious,
+                  child: Text(
+                    '前回 ${store.setLabel(widget.exerciseId, prev)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ),
+              if (rm != null)
+                Text(
+                  load == null
+                      ? 'RM ${fmt1(rm)}'
+                      : '実負荷 ${fmt1(load)} ・ RM ${fmt1(rm)}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.bold),
+                ),
+            ],
+          ),
         ),
         IconButton(
           visualDensity: VisualDensity.compact,
@@ -469,4 +678,10 @@ class _SetRowState extends State<SetRow> {
       ]),
     );
   }
+}
+
+String _signed(double d) {
+  final r = (d * 10).round() / 10;
+  if (r == 0) return '±0';
+  return r > 0 ? '+${fmtNum(r)}' : fmtNum(r);
 }
