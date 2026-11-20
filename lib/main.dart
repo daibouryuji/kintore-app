@@ -51,6 +51,26 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int index = 0;
 
+  // アプリが裏に回ったり閉じられたりするとき、保存待ちのデータをすぐ保存する
+  late final AppLifecycleListener _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle = AppLifecycleListener(
+      onHide: store.flush,
+      onInactive: store.flush,
+      onPause: store.flush,
+      onDetach: store.flush,
+    );
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
   static const pages = [
     TodayScreen(),
     ExercisesScreen(),

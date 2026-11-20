@@ -57,6 +57,7 @@ class _TodayScreenState extends State<TodayScreen> {
       );
 
   void _commit() => store.saveWorkout(workout);
+  void _commitQuiet() => store.updateWorkoutQuiet(workout);
 
   void _moveDate(int days) {
     setState(() {
@@ -152,7 +153,11 @@ class _TodayScreenState extends State<TodayScreen> {
                 date: date,
                 onChanged: _changeMenu,
               ),
-              if (w.logs.isNotEmpty) _DaySummary(workout: w),
+              if (w.logs.isNotEmpty)
+                ListenableBuilder(
+                  listenable: store.workoutTick,
+                  builder: (context, _) => _DaySummary(workout: w),
+                ),
               const SizedBox(height: 8),
               if (w.logs.isEmpty)
                 const Padding(
@@ -169,6 +174,7 @@ class _TodayScreenState extends State<TodayScreen> {
                   date: dateKey,
                   target: _targetFor(menu, log.exerciseId),
                   onChanged: _commit,
+                  onEdited: _commitQuiet,
                   onRemove: () async {
                     if (log.doneSets.isNotEmpty &&
                         !await confirmDialog(
@@ -338,17 +344,28 @@ class ExerciseCard extends StatelessWidget {
     required this.date,
     required this.target,
     required this.onChanged,
+    required this.onEdited,
     required this.onRemove,
   });
 
   final ExerciseLog log;
   final String date;
   final MenuItem? target;
+
+  /// セットの追加・削除など（画面全体を更新）
   final VoidCallback onChanged;
+
+  /// セットの数字の入力（このカードだけ更新）
+  final VoidCallback onEdited;
   final VoidCallback onRemove;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: store.workoutTick,
+        builder: (context, _) => _build(context),
+      );
+
+  Widget _build(BuildContext context) {
     final theme = Theme.of(context);
     final ex = store.exercise(log.exerciseId);
     final last = store.lastSets(log.exerciseId, date);
@@ -493,7 +510,7 @@ class ExerciseCard extends StatelessWidget {
                 previous: last == null
                     ? null
                     : last.$2[i < last.$2.length ? i : last.$2.length - 1],
-                onChanged: onChanged,
+                onChanged: onEdited,
                 onDelete: () {
                   log.sets.removeAt(i);
                   onChanged();

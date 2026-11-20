@@ -1,5 +1,6 @@
 // アプリ全体のデータを持ち、端末（ブラウザ）に保存するクラス。
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -20,6 +21,10 @@ class Store extends ChangeNotifier {
   bool rotationMode = false;
 
   SharedPreferences? _prefs;
+  Timer? _saveTimer;
+
+  /// セットの数字を打っているときだけ通知する（記録カードだけが描き直される）
+  final workoutTick = ValueNotifier<int>(0);
 
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
@@ -36,10 +41,25 @@ class Store extends ChangeNotifier {
   /// 中身を変えたら必ず呼ぶ。画面の更新と保存を行う。
   void changed() {
     notifyListeners();
-    _save();
+    _scheduleSave();
+  }
+
+  /// 保存は、変更が0.5秒止まってからまとめて行う
+  void _scheduleSave() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 500), _save);
+  }
+
+  /// 保存待ちがあればすぐ保存する（アプリが裏に回るときなど）
+  Future<void> flush() async {
+    if (_saveTimer == null) return;
+    _saveTimer!.cancel();
+    _saveTimer = null;
+    await _save();
   }
 
   Future<void> _save() async {
+    _saveTimer = null;
     await _prefs?.setString(_key, jsonEncode(toJson()));
   }
 
@@ -175,6 +195,17 @@ class Store extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  /// セットの数字の入力用：画面全体ではなく記録カードだけを更新する
+  void updateWorkoutQuiet(Workout w) {
+    if (!workouts.contains(w)) {
+      workouts.removeWhere((x) => x.date == w.date);
+      workouts.add(w);
+      workouts.sort((a, b) => a.date.compareTo(b.date));
+    }
+    workoutTick.value++;
+    _scheduleSave();
   }
 
   void saveWorkout(Workout w) {
