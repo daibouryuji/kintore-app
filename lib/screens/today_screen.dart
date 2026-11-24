@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../store.dart';
 import '../widgets.dart';
+import 'calendar_screen.dart';
 import 'exercises_screen.dart';
 
 class TodayScreen extends StatefulWidget {
@@ -66,12 +67,11 @@ class _TodayScreenState extends State<TodayScreen> {
     });
   }
 
+  /// カレンダーを開き、選んだ日に移動する
   Future<void> _pickDate() async {
-    final d = await showDatePicker(
-      context: context,
-      initialDate: date,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+    final d = await Navigator.push<DateTime>(
+      context,
+      MaterialPageRoute(builder: (_) => CalendarPage(selected: date)),
     );
     if (d != null) {
       setState(() {
@@ -129,6 +129,10 @@ class _TodayScreenState extends State<TodayScreen> {
               child: Text('${shortDate(dateKey)}${isToday ? '  今日' : ''}'),
             ),
             actions: [
+              IconButton(
+                  tooltip: 'カレンダー',
+                  onPressed: _pickDate,
+                  icon: const Icon(Icons.calendar_month)),
               IconButton(
                   onPressed: () => _moveDate(-1),
                   icon: const Icon(Icons.chevron_left)),
